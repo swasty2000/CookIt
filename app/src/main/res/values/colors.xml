@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Backgrounds -->
+    <color name="bg_dark">#0A1A0F</color>
+    <color name="surface_card">#132219</color>
+    <color name="surface_elevated">#1C3326</color>
+
+    <!-- Green palette -->
+    <color name="green_primary">#4CAF50</color>
+    <color name="green_accent">#81C784</color>
+    <color name="green_light">#2E7D32</color>
+    <color name="green_dim">#1B5E20</color>
+
+    <!-- Red palette -->
+    <color name="red_accent">#D32F2F</color>
+    <color name="red_light">#EF5350</color>
+    <color name="red_dim">#7F1D1D</color>
+
+    <!-- Text -->
+    <color name="text_light">#E8F5E9</color>
+    <color name="text_muted">#78A882</color>
+    <color name="text_dark">#0A1A0F</color>
+    <color name="text_gray">#78A882</color>
+    <color name="white">#FFFFFF</color>
+
+    <!-- Misc -->
+    <color name="divider">#1E3829</color>
+    <color name="chip_stroke">#2E7D32</color>
+</resources>

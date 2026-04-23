@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.CookIt" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">@color/green_primary</item>
+        <item name="colorPrimaryVariant">@color/green_light</item>
+        <item name="colorAccent">@color/red_accent</item>
+        <item name="android:windowBackground">@color/white</item>
+        <item name="colorOnPrimary">@color/white</item>
+    </style>
+</resources>
