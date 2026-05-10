@@ -1,87 +1,131 @@
 package com.example.cookit
 
-import com.aallam.openai.api.chat.ChatCompletionRequest
-import com.aallam.openai.api.chat.ChatMessage
-import com.aallam.openai.api.chat.ChatRole
-import com.aallam.openai.api.model.ModelId
-import com.aallam.openai.client.OpenAI
-import com.aallam.openai.client.OpenAIConfig
-import com.aallam.openai.client.OpenAIHost
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 object CookAiService {
 
-    private const val TOKEN = "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"
-
-    // ✅ TRUE = мгновенные тестовые данные (для проверки UI)
-    // ✅ FALSE = реальный запрос к AI
     private const val MOCK_MODE = false
 
-    private val openAI = OpenAI(
-        config = OpenAIConfig(
-            token = TOKEN,
-            host = OpenAIHost(baseUrl = "https://router.huggingface.co/v1/")
-        )
-    )
+    private const val TOKEN = "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"
+
+    // ✅ Правильный URL — как в официальном примере HuggingFace
+    private const val BASE_URL = "https://router.huggingface.co/v1/chat/completions"
+
+    // ✅ Провайдер :hf-inference обязателен в названии модели
+    private const val MODEL = "meta-llama/Llama-3.1-8B-Instruct:novita"
+
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
 
     private val SYSTEM_PROMPT = """
-        Ты — кулинарный помощник. Пользователь даёт список ингредиентов.
-        Предложи 4-5 блюд которые можно приготовить из этих ингредиентов (некоторые можно не использовать).
-        
-        ВАЖНО: Отвечай ТОЛЬКО валидным JSON без каких-либо пояснений, markdown-разметки или текста вне JSON.
-        
-        Формат ответа (строго):
+    You are a cooking assistant. The user gives you a list of ingredients.
+    Suggest 4-5 dishes that can be made from these ingredients.
+    IMPORTANT: Reply ONLY with valid JSON, no explanations or markdown.
+    Response format:
+    {
+      "dishes": [
+        {
+          "name": "Dish name in Russian",
+          "emoji": "🍳",
+          "short_desc": "Short description in Russian",
+          "cook_time": "30 мин",
+          "ingredients": [{"name": "Ingredient in Russian", "amount": "100 г"}],
+          "steps": ["Write as many steps as needed to fully describe the recipe, do not limit yourself"]
+        }
+      ]
+    }
+    All text must be in Russian language.
+    The "steps" array must contain ALL steps needed to cook the dish — typically 4-8 steps.
+    Return ONLY the JSON object.
+""".trimIndent()
+    suspend fun getDishes(ingredients: List<String>): String = withContext(Dispatchers.IO) {
+        if (MOCK_MODE) {
+            kotlinx.coroutines.delay(1200)
+            return@withContext MOCK_JSON
+        }
+
+        val userMessage = "Ingredients I have: ${ingredients.joinToString(", ")}. What can I cook? Reply in Russian with JSON only."
+
+        // Тело запроса — модель передаётся В ТЕЛЕ, URL один для всех
+        val body = JSONObject().apply {
+            put("model", MODEL)
+            put("max_tokens", 2048)
+            put("messages", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("role", "system")
+                    put("content", SYSTEM_PROMPT)
+                })
+                put(JSONObject().apply {
+                    put("role", "user")
+                    put("content", userMessage)
+                })
+            })
+        }.toString()
+
+        val request = Request.Builder()
+            .url(BASE_URL)
+            .addHeader("Authorization", "Bearer $TOKEN")
+            .addHeader("Content-Type", "application/json")
+            .post(body.toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = client.newCall(request).execute()
+        val responseBody = response.body?.string() ?: throw Exception("Пустой ответ")
+
+        if (!response.isSuccessful) {
+            throw Exception("Ошибка ${response.code}: $responseBody")
+        }
+
+        val json = JSONObject(responseBody)
+        var content = json
+            .getJSONArray("choices")
+            .getJSONObject(0)
+            .getJSONObject("message")
+            .getString("content")
+
+        // Вырезаем JSON если модель добавила текст вокруг
+        val start = content.indexOf('{')
+        val end = content.lastIndexOf('}')
+        if (start != -1 && end != -1) {
+            content = content.substring(start, end + 1)
+        }
+
+        content
+    }
+
+    private val MOCK_JSON = """
         {
           "dishes": [
             {
-              "name": "Название блюда",
+              "name": "Классическая яичница с помидорами",
               "emoji": "🍳",
-              "short_desc": "Краткое описание в 1-2 предложения что за блюдо",
-              "cook_time": "30 мин",
+              "short_desc": "Сытный и быстрый завтрак за 10 минут.",
+              "cook_time": "10 мин",
               "ingredients": [
-                {"name": "Ингредиент", "amount": "200 г"},
-                {"name": "Другой ингредиент", "amount": "3 шт"}
+                {"name": "Яйца", "amount": "3 шт"},
+                {"name": "Помидоры", "amount": "2 шт"},
+                {"name": "Масло растительное", "amount": "1 ст. л."},
+                {"name": "Соль и перец", "amount": "по вкусу"}
               ],
               "steps": [
-                "Подробный шаг приготовления 1...",
-                "Подробный шаг приготовления 2...",
-                "Подробный шаг приготовления 3..."
+                "Нарежь помидоры кубиками.",
+                "Разогрей сковороду с маслом, обжарь помидоры 2 минуты.",
+                "Разбей яйца, посоли и поперчи.",
+                "Накрой крышкой и готовь 3-4 минуты."
               ]
             }
           ]
         }
-        
-        - emoji: подходящий эмодзи для блюда
-        - short_desc: 1-2 предложения, аппетитное описание
-        - cook_time: реалистичное время (например "20 мин", "1 час")
-        - ingredients: точные граммовки или штуки
-        - steps: 3-6 подробных шагов приготовления
-        - Все на русском языке
-        - ТОЛЬКО JSON, никакого другого текста
     """.trimIndent()
-
-    suspend fun getDishes(ingredients: List<String>): String {
-        if (MOCK_MODE) {
-            kotlinx.coroutines.delay(1200) // имитируем загрузку
-            return MOCK_JSON
-        }
-
-        val userMessage = "У меня есть: ${ingredients.joinToString(", ")}. Что можно приготовить?"
-
-        val messages = listOf(
-            ChatMessage(role = ChatRole.System, content = SYSTEM_PROMPT),
-            ChatMessage(role = ChatRole.User, content = userMessage)
-        )
-
-        val request = ChatCompletionRequest(
-            // 🚀 Быстрая модель — отвечает за 5-10 сек вместо таймаута
-            model = ModelId("Qwen/Qwen2.5-72B-Instruct"),
-            messages = messages,
-            maxTokens = 2048
-        )
-
-        return openAI.chatCompletion(request).choices.first().message.content
-            ?: throw Exception("Пустой ответ от сервера")
-    }
-
-    private val MOCK_JSON = """{"dishes":[{"name":"Классическая яичница с помидорами","emoji":"🍳","short_desc":"Сытный и быстрый завтрак за 10 минут. Яйца с сочными помидорами — всегда вкусно.","cook_time":"10 мин","ingredients":[{"name":"Яйца","amount":"3 шт"},{"name":"Помидоры","amount":"2 шт"},{"name":"Лук репчатый","amount":"0.5 шт"},{"name":"Масло растительное","amount":"1 ст. л."},{"name":"Соль и перец","amount":"по вкусу"}],"steps":["Нарежь помидоры кубиками, лук — полукольцами.","Разогрей сковороду с маслом, обжарь лук 2-3 минуты до прозрачности.","Добавь помидоры и обжаривай ещё 2 минуты.","Разбей яйца прямо на овощи, посоли и поперчи.","Накрой крышкой и готовь 3-4 минуты до желаемой прожарки."]},{"name":"Куриный суп с рисом","emoji":"🍲","short_desc":"Наваристый домашний суп на курином бульоне с рисом и овощами. Согревает и насыщает.","cook_time":"45 мин","ingredients":[{"name":"Куриное филе","amount":"400 г"},{"name":"Рис","amount":"80 г"},{"name":"Морковь","amount":"1 шт"},{"name":"Лук репчатый","amount":"1 шт"},{"name":"Картофель","amount":"2 шт"},{"name":"Соль, лавровый лист","amount":"по вкусу"}],"steps":["Залей курицу 1.5 л холодной воды, доведи до кипения, сними пену и вари 20 минут.","Достань курицу, нарежь на кусочки и верни в бульон.","Добавь нарезанный кубиками картофель и промытый рис.","Обжарь лук и морковь 5 минут и добавь в суп.","Вари ещё 15 минут до мягкости картофеля, посоли.","Дай настояться 5 минут под крышкой."]},{"name":"Макароны с сыром и чесноком","emoji":"🍝","short_desc":"Простое сытное блюдо в стиле итальянской пасты. Готовится за 20 минут.","cook_time":"20 мин","ingredients":[{"name":"Макароны","amount":"250 г"},{"name":"Сыр твёрдый","amount":"100 г"},{"name":"Чеснок","amount":"3 зубчика"},{"name":"Сливочное масло","amount":"40 г"},{"name":"Соль, чёрный перец","amount":"по вкусу"}],"steps":["Отвари макароны в подсоленной воде, слей воду, оставив 50 мл.","Растопи масло в сковороде, обжарь чеснок 1-2 минуты до аромата.","Добавь макароны и немного воды от варки, перемешай.","Натри сыр и всыпь в сковороду, быстро перемешивая.","Поперчи и подавай сразу."]},{"name":"Картофельные оладьи","emoji":"🥞","short_desc":"Хрустящие драники из картофеля — любимое блюдо с детства. Идеально со сметаной.","cook_time":"30 мин","ingredients":[{"name":"Картофель","amount":"500 г"},{"name":"Яйцо","amount":"1 шт"},{"name":"Лук репчатый","amount":"1 шт"},{"name":"Мука","amount":"2 ст. л."},{"name":"Масло растительное","amount":"3 ст. л."},{"name":"Соль","amount":"1 ч. л."}],"steps":["Натри картофель и лук на крупной тёрке, отожми лишний сок.","Добавь яйцо, муку и соль, перемешай.","Разогрей масло на сковороде на среднем огне.","Выкладывай ложкой, обжаривай по 3-4 минуты с каждой стороны.","Подавай горячими со сметаной."]},{"name":"Омлет с сыром","emoji":"🧀","short_desc":"Воздушный французский омлет с расплавленным сыром внутри. Нежный и аппетитный.","cook_time":"8 мин","ingredients":[{"name":"Яйца","amount":"3 шт"},{"name":"Молоко","amount":"3 ст. л."},{"name":"Сыр твёрдый","amount":"50 г"},{"name":"Сливочное масло","amount":"15 г"},{"name":"Соль","amount":"щепотка"}],"steps":["Взбей яйца с молоком и щепоткой соли.","Натри сыр на мелкой тёрке.","Растопи масло на сковороде, влей яичную смесь.","Когда края начнут схватываться, посыпь половину омлета сыром.","Сложи пополам и держи ещё 1 минуту. Подавай сразу."]}]}"""
 }
