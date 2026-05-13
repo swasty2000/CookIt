@@ -1,5 +1,4 @@
 package com.example.cookit
-
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -9,7 +8,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-
 object CookAiService {
 
     private const val MOCK_MODE = false
@@ -24,13 +22,13 @@ object CookAiService {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(400, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
     private val SYSTEM_PROMPT = """
     You are a cooking assistant. The user gives you a list of ingredients.
-    Suggest 4-5 dishes that can be made from these ingredients.
+    Suggest 1 to 10 real, well-known dishes that can be made from these ingredients. Do not invent non-existent recipes.
     IMPORTANT: Reply ONLY with valid JSON, no explanations or markdown.
     Response format:
     {
@@ -41,13 +39,11 @@ object CookAiService {
           "short_desc": "Short description in Russian",
           "cook_time": "30 мин",
           "ingredients": [{"name": "Ingredient in Russian", "amount": "100 г"}],
-          "steps": ["Write as many steps as needed to fully describe the recipe, do not limit yourself"]
+          "steps": ["Provide as many detailed steps as necessary to complete the recipe in Russian"]
         }
       ]
     }
-    All text must be in Russian language.
-    The "steps" array must contain ALL steps needed to cook the dish — typically 4-8 steps.
-    Return ONLY the JSON object.
+    All text must be in Russian language. Return ONLY the JSON object.
 """.trimIndent()
     suspend fun getDishes(ingredients: List<String>): String = withContext(Dispatchers.IO) {
         if (MOCK_MODE) {
