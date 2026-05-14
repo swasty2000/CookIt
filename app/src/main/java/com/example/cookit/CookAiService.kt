@@ -1,4 +1,5 @@
 package com.example.cookit
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -8,17 +9,15 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+
 object CookAiService {
 
     private const val MOCK_MODE = false
 
-    private const val TOKEN = "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"
-
-    // ✅ Правильный URL — как в официальном примере HuggingFace
-    private const val BASE_URL = "https://router.huggingface.co/v1/chat/completions"
-
-    // ✅ Провайдер :hf-inference обязателен в названии модели
-    private const val MODEL = "meta-llama/Llama-3.1-8B-Instruct:novita"
+    // 1. Используем прямой путь к модели (Native API)
+    // API Ключ передается в самом URL параметром ?key=
+    private const val TOKEN = "AIzaSyCPF6mDYsWOgYclLZhvIOAKqTqS8ucjRmc"
+    private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$TOKEN"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -27,53 +26,54 @@ object CookAiService {
         .build()
 
     private val SYSTEM_PROMPT = """
-    You are a cooking assistant. The user gives you a list of ingredients.
-    Suggest 1 to 10 real, well-known dishes that can be made from these ingredients. Do not invent non-existent recipes.
-    IMPORTANT: Reply ONLY with valid JSON, no explanations or markdown.
-    Response format:
+    You are a cooking assistant. Suggest 1 to 10 real dishes from ingredients.
+    IMPORTANT: Reply ONLY with valid JSON.
+    Format:
     {
       "dishes": [
         {
-          "name": "Dish name in Russian",
+          "name": "Название",
           "emoji": "🍳",
-          "short_desc": "Short description in Russian",
+          "short_desc": "Описание",
           "cook_time": "30 мин",
-          "ingredients": [{"name": "Ingredient in Russian", "amount": "100 г"}],
-          "steps": ["Provide as many detailed steps as necessary to complete the recipe in Russian"]
+          "ingredients": [{"name": "Ингредиент", "amount": "100 г"}],
+          "steps": ["Шаг 1", "Шаг 2"]
         }
       ]
     }
-    All text must be in Russian language. Return ONLY the JSON object.
+    Language: Russian.
 """.trimIndent()
+
     suspend fun getDishes(ingredients: List<String>): String = withContext(Dispatchers.IO) {
         if (MOCK_MODE) {
             kotlinx.coroutines.delay(1200)
             return@withContext MOCK_JSON
         }
 
-        val userMessage = "Ingredients I have: ${ingredients.joinToString(", ")}. What can I cook? Reply in Russian with JSON only."
+        val userMessage = "Ингредиенты: ${ingredients.joinToString(", ")}. Что приготовить? Ответь только JSON на русском."
 
-        // Тело запроса — модель передаётся В ТЕЛЕ, URL один для всех
-        val body = JSONObject().apply {
-            put("model", MODEL)
-            put("max_tokens", 2048)
-            put("messages", JSONArray().apply {
+        // 2. Структура тела запроса для Родного API Gemini (отличается от OpenAI)
+        val bodyJson = JSONObject().apply {
+            put("contents", JSONArray().apply {
                 put(JSONObject().apply {
-                    put("role", "system")
-                    put("content", SYSTEM_PROMPT)
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply {
+                            // Соединяем системный промпт и сообщение пользователя
+                            put("text", "$SYSTEM_PROMPT\n\nUser request: $userMessage")
+                        })
+                    })
                 })
-                put(JSONObject().apply {
-                    put("role", "user")
-                    put("content", userMessage)
-                })
+            })
+            // Дополнительно просим модель выдавать чистый JSON (JSON Mode)
+            put("generationConfig", JSONObject().apply {
+                put("response_mime_type", "application/json")
             })
         }.toString()
 
         val request = Request.Builder()
             .url(BASE_URL)
-            .addHeader("Authorization", "Bearer $TOKEN")
             .addHeader("Content-Type", "application/json")
-            .post(body.toRequestBody("application/json".toMediaType()))
+            .post(bodyJson.toRequestBody("application/json".toMediaType()))
             .build()
 
         val response = client.newCall(request).execute()
@@ -83,14 +83,17 @@ object CookAiService {
             throw Exception("Ошибка ${response.code}: $responseBody")
         }
 
+        // 3. Парсинг ответа (у Gemini другая вложенность)
         val json = JSONObject(responseBody)
         var content = json
-            .getJSONArray("choices")
+            .getJSONArray("candidates")
             .getJSONObject(0)
-            .getJSONObject("message")
-            .getString("content")
+            .getJSONObject("content")
+            .getJSONArray("parts")
+            .getJSONObject(0)
+            .getString("text")
 
-        // Вырезаем JSON если модель добавила текст вокруг
+        // Очистка от лишних символов (на всякий случай)
         val start = content.indexOf('{')
         val end = content.lastIndexOf('}')
         if (start != -1 && end != -1) {
@@ -100,28 +103,5 @@ object CookAiService {
         content
     }
 
-    private val MOCK_JSON = """
-        {
-          "dishes": [
-            {
-              "name": "Классическая яичница с помидорами",
-              "emoji": "🍳",
-              "short_desc": "Сытный и быстрый завтрак за 10 минут.",
-              "cook_time": "10 мин",
-              "ingredients": [
-                {"name": "Яйца", "amount": "3 шт"},
-                {"name": "Помидоры", "amount": "2 шт"},
-                {"name": "Масло растительное", "amount": "1 ст. л."},
-                {"name": "Соль и перец", "amount": "по вкусу"}
-              ],
-              "steps": [
-                "Нарежь помидоры кубиками.",
-                "Разогрей сковороду с маслом, обжарь помидоры 2 минуты.",
-                "Разбей яйца, посоли и поперчи.",
-                "Накрой крышкой и готовь 3-4 минуты."
-              ]
-            }
-          ]
-        }
-    """.trimIndent()
+    private val MOCK_JSON = """ { "dishes": [] } """ // (оставил для примера)
 }
