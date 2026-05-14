@@ -23,7 +23,7 @@ IDE: Android Studio
 Клонируйте репозиторий:
 
 Bash
-git clone https://github.com/ваш_логин/cookit.git
+git clone https://github.com/swasty2000/CookIt.git
 Создайте файл local.properties в корне проекта (если его нет) и добавьте ваш токен Hugging Face:
 
 Properties
